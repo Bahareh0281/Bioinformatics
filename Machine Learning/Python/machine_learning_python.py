@@ -12,6 +12,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
+from scipy.stats import fisher_exact
 
 # Load the datasets
 case_data = pd.read_csv('PC_case.csv')
@@ -61,3 +62,75 @@ y_pred = clf.predict(X_test)
 # Evaluate the model
 print("Accuracy:", accuracy_score(y_test, y_pred))
 print("Classification Report:\n", classification_report(y_test, y_pred))
+
+"""# Statistics"""
+
+# Chromosomal Region Analysis
+# Calculate frequency of CNVs per region in cases and controls
+data['Region'] = data['Chromosome'].astype(str) + ":" + data['Start'].astype(str) + "-" + data['End'].astype(str)
+region_stats = data.groupby(['Region', 'Label']).size().unstack(fill_value=0)
+region_stats.columns = ['Control_Count', 'Case_Count']
+region_stats['Total'] = region_stats['Control_Count'] + region_stats['Case_Count']
+region_stats['Case_Frequency'] = region_stats['Case_Count'] / region_stats['Total']
+region_stats['Control_Frequency'] = region_stats['Control_Count'] / region_stats['Total']
+
+# Statistical significance using Fisher's Exact Test
+def fisher_test(row):
+    table = [[row['Case_Count'], row['Control_Count']],
+             [region_stats['Case_Count'].sum() - row['Case_Count'],
+              region_stats['Control_Count'].sum() - row['Control_Count']]]
+    _, p_value = fisher_exact(table)
+    return p_value
+
+region_stats['P_Value'] = region_stats.apply(fisher_test, axis=1)
+
+# Filter significant regions (e.g., p-value < 0.05)
+significant_regions = region_stats[region_stats['P_Value'] < 0.05]
+
+# Map Significant Regions to Genes
+def map_to_genes(cnv_data, genes):
+    cnv_data['Gene'] = None
+    for index, row in cnv_data.iterrows():
+        chrom, start, end = row.name.split(':')[0], int(row.name.split(':')[1].split('-')[0]), int(row.name.split(':')[1].split('-')[1])
+        overlapping_genes = genes[(genes['Gene_Start'] <= end) & (genes['Gene_End'] >= start) & (genes['Chromosome'] == int(chrom))]
+        cnv_data.at[index, 'Gene'] = ','.join(overlapping_genes['Gene_ID'].unique())
+    return cnv_data
+
+significant_regions_with_genes = map_to_genes(significant_regions, gene_list)
+
+# Save results
+significant_regions_with_genes.to_csv('significant_regions_with_genes.csv', index=False)
+print("Analysis complete. Results saved to 'significant_regions_with_genes.csv'.")
+
+import matplotlib.pyplot as plt
+
+# Bar plot: Compare Case_Count and Control_Count for top significant regions
+top_regions = significant_regions.nlargest(10, 'Case_Count')
+plt.figure(figsize=(10, 6))
+plt.bar(top_regions.index, top_regions['Case_Count'], label='Case Count', alpha=0.7)
+plt.bar(top_regions.index, top_regions['Control_Count'], label='Control Count', alpha=0.7)
+plt.xlabel('Top Significant Regions')
+plt.ylabel('Count')
+plt.title('Case vs Control Count for Top Significant Regions')
+plt.legend()
+plt.show()
+
+# Histogram: Distribution of P-Values
+plt.figure(figsize=(10, 6))
+plt.hist(significant_regions['P_Value'], bins=20, color='blue', alpha=0.7)
+plt.xlabel('P-Value')
+plt.ylabel('Frequency')
+plt.title('Distribution of P-Values for Significant Regions')
+plt.show()
+
+# Gene Frequency: Count the most associated genes
+if 'Gene' in significant_regions.columns:
+    gene_counts = significant_regions['Gene'].value_counts().head(10)
+    plt.figure(figsize=(10, 6))
+    gene_counts.plot(kind='bar', color='green', alpha=0.7)
+    plt.xlabel('Genes')
+    plt.ylabel('Frequency')
+    plt.title('Top Associated Genes')
+    plt.show()
+else:
+    print("No gene information available in the dataset.")
