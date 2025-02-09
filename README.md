@@ -48,10 +48,5 @@ The objective was to identify genomic regions where CNVs are more prevalent in t
   - **Cases File:** Contains CNV reports for individuals with cancer.
   - **Controls File:** Contains CNV reports for healthy individuals.
 
----
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
 
 
